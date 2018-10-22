@@ -229,3 +229,72 @@ Return_i <- (h*(1+I)*(1+D)+(1-h)*(1+I))-1
 Return_year <-(Return_i)*12*100
 
 hist(Return_year, breaks = 50, col="lightgreen")
+
+
+
+
+
+#checking whether the default date matches the actual default(2 consecutive missed payments)
+
+library(tidyverse)
+
+Loan_data <- read_csv("C:/Users/abyanjan/Downloads/LoanData (2).zip")
+repayment_data <- read_csv("C:/Users/abyanjan/Downloads/RepaymentsData (3).zip")
+
+#data of default loans only
+default_data <- Loan_data %>% 
+  select(LoanId,DefaultDate) %>% 
+  filter(!is.na(DefaultDate))
+
+#loan ids of default loans
+default_id <- default_data$LoanId
+
+#repayment data for the default loans
+repayment_default <- repayment_data %>% 
+  filter(loan_id %in% default_id) %>% 
+  select(loan_id,Date) %>% 
+  rename("LoanId" = loan_id) 
+  
+
+length(unique(repayment_default$LoanId))
+
+
+#join default_data and repayment_data
+join_data <- default_data %>% 
+  left_join(repayment_default,by="LoanId")
+
+# arranging join data by loanid and date
+join_data <- join_data %>% 
+  arrange(LoanId,Date) %>% 
+  select(LoanId,Date,DefaultDate) %>% 
+#remove NAs from Date 
+  filter(!is.na(Date))
+
+
+#creating a column to calculate the diff in days between last payment before default and default date
+join_data <- join_data %>% 
+  mutate(diff_def_pay = DefaultDate - Date) 
+
+#filtering out the data for payment dates passed default date
+join_data <- join_data %>% 
+ filter(!(Date >= DefaultDate))
+
+
+#find the closet value to 60 days difference in default date and last payment before default date for each loan id
+
+closest_day <-join_data %>% 
+  group_by(LoanId) %>% 
+  summarize(nearest_day = min(abs(diff_def_pay))) %>% 
+  mutate(nearest_day =as.numeric(nearest_day))
+
+#histogram of the days between default date and the earliest date before default data
+
+hist(closest_day$nearest_day,breaks = 100, xlab = "Days",main = "Days between the default date and last payment 
+     date  before default date", col="lightblue")
+boxplot(closest_day$nearest_day, main="Days between the default date and payment 
+     date just before default data", col= "yellow" )
+summary(closest_day$nearest_day)
+
+
+
+
