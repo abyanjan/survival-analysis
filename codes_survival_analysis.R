@@ -2,6 +2,7 @@
 #Importing libraries
 
 library(tidyverse)
+library(dplyr)
 library(car)
 library(caret)
 library(corrplot)
@@ -25,67 +26,66 @@ survdata <- LoanData[c(1,2,10,12,13,16,19,21,23,24,25,27,28,29,32,34,36,49,65,68
 # time period for the defaulted loans
 
 time_1 <- survdata %>%
-  filter(is.na(DefaultDate) == FALSE ) %>%
-  mutate (Time = as.numeric( DefaultDate - LoanDate)) %>% 
-  mutate(Time = round(Time/(365.25/12))) %>% # substracting 3 to make true survival period
-  mutate(Status = 1,
-         State="Default" )
-  
+  filter(!is.na(DefaultDate)) %>%
+  mutate (Time = as.numeric( DefaultDate - LoanDate),
+          Time = round(Time/(365.25/12)) - 2,    # substracting 2 to make true survival period
+          Status = 1,
+          State="Default") 
+
 
 # time period for paid up loans  
-time_2 <- survdata %>% 
-  filter(Status == 'Repaid' & is.na(DefaultDate)== T) %>% 
-  mutate(Time = as.numeric( ContractEndDate - LoanDate)) %>% 
-  mutate(Time = round(Time/(365.25/12))) %>% 
-  mutate(Status = 0,
-         State="Repaid")
+
+time_2 <- survdata %>%
+  filter(Status == 'Repaid' & is.na(DefaultDate)) %>%
+  mutate (Time = as.numeric( ContractEndDate - LoanDate),
+          Time = round(Time/(365.25/12)),
+          Status = 0,
+          State="Repaid")
+
+
 
 #time period for the ongoing loans with status as current and no default dates
 time_3 <- survdata %>%
-  filter(Status =='Current'  & is.na(DefaultDate)== T) %>% 
-  mutate(Time = as.numeric( ReportAsOfEOD - LoanDate)) %>% 
-  mutate(Time = round(Time/(365.25/12))) %>% 
-  mutate(Status =0, 
-        State="Current")
+  filter(Status == 'Current' & is.na(DefaultDate)) %>% 
+  mutate(Time = as.numeric( ReportAsOfEOD - LoanDate),
+         Time = round(Time/(365.25/12)),
+         Status =0, 
+         State="Current")
 
 
 #time period for the ongoing loans with status as late and no default date
 time_4 <- survdata %>%
-  filter(Status == 'Late' & is.na(DefaultDate)== T) %>% 
-  mutate(Time = as.numeric( ReportAsOfEOD - LoanDate)) %>% 
-  mutate(Time = round(Time/(365.25/12))) %>% 
-  mutate(Status= 0,
-         State="Current")
+  filter(Status == 'Late' & is.na(DefaultDate)) %>% 
+  mutate(Time = as.numeric( ReportAsOfEOD - LoanDate),
+         Time = round(Time/(365.25/12)),
+         Status= 0,
+         State="Current") 
 
 
-#combining the data sets having the survival times  removing unnecessary columns
+#combining the data sets having the survival times  removing unnecessary column
 
 survival_data <- bind_rows(time_1,time_2,time_3,time_4)
 
 
 summary(survival_data)
 
-#removing observations with  0 values in EmploymentStatus variable and replacing -1 with 1
+#removing observations with  0 values in EmploymentStatus variable and replacing -1 with 1 in 
+#EmploymentStatus,UseofLoan and MaritalStatus
+
 survival_data <- survival_data %>% 
-  filter(EmploymentStatus != 0) 
-  
-survival_data$EmploymentStatus <-  recode(survival_data$EmploymentStatus,'-1 = 1')
-
-# replacing values -1 in UseofLoan by 1
-survival_data$UseOfLoan <-  recode(survival_data$UseOfLoan,'-1 = 1')
-
-# replacing values -1 in MaritalStatus by 1
-survival_data$MaritalStatus <-  recode(survival_data$MaritalStatus,'-1 = 1')
-
+  filter(EmploymentStatus != 0) %>% 
+  mutate(EmploymentStatus = if_else(EmploymentStatus == -1, 1L, EmploymentStatus),
+         UseOfLoan = if_else(UseOfLoan == -1, 1L, UseOfLoan),
+         MaritalStatus = if_else(MaritalStatus == -1, 1L, MaritalStatus))
+ 
 summary(survival_data)
 str(survival_data)
 
 
 #Binnig the Income to categorica variable
-library(OneR)
 
 survival_data$IncomeTotal <- bin(survival_data$IncomeTotal, nbins = 3, 
-                                 labels =    c('low','middle','high'),
+                                 labels = c('low','middle','high'),
                                  method = 'content')
 
 colSums(is.na(survival_data))
@@ -136,7 +136,7 @@ levels(survival_data$Rating)
 colSums(is.na(survival_data))
 
 #Removing observations with NAs in Time variable
-survival_data <- survival_data[is.na(survival_data$Time)==FALSE, ]
+survival_data <- survival_data[!is.na(survival_data$Time),]
 
 colSums(is.na(survival_data))
 
@@ -195,10 +195,9 @@ ggsurvplot(survfit(res.cox), data = train,
 
 #exponential model 
 
-library(plyr)
 #changing survival time of 0 to 1
 
-survival_data$Time <- mapvalues(survival_data$Time, from= 0, to=1)
+survival_data$Time <- ifelse(survival_data$Time == 0,1, survival_data$Time)
 
 
 exp_model <-survreg(Surv(Time, Status)~ NewCreditCustomer+VerificationType+Age+Gender+Country+
@@ -229,6 +228,64 @@ Return_i <- (h*(1+I)*(1+D)+(1-h)*(1+I))-1
 Return_year <-(Return_i)*12*100
 
 hist(Return_year, breaks = 50, col="lightgreen")
+
+
+#exponential model with train and test data
+
+#Divide train and test sets
+
+train_index <- createDataPartition(survival_data$Status, p=0.8, list = FALSE)
+
+train_data <- survival_data[train_index,]
+test_data <- survival_data[-train_index,]
+
+#exponential model for train data
+
+exp_train <- survreg(Surv(Time, Status)~ NewCreditCustomer+VerificationType+Age+Gender+Country+
+                       AppliedAmount+Interest+LoanDuration+UseOfLoan+MaritalStatus+EmploymentStatus+
+                       IncomeTotal+Rating,
+                     dist = "exponential", data = train_data)
+summary(exp_train)
+
+#calculating hazard rates on test data
+
+hazard_test <- 1/predict(exp_model, newdata = test_data, type='response')
+
+survival_test <- exp(-hazard_test)
+
+Interest_test <- (test_data$Interest/12)/100
+
+#taking hazard and Interest for only non-missing value of loss given default
+
+h_test <- hazard_test[which(!is.na(test_data$LossGivenDefault))]
+I_test <- Interest_test[which(!is.na(test_data$LossGivenDefault))]
+D_test <- -(test_data$LossGivenDefault[which(!is.na(test_data$LossGivenDefault))])
+
+
+Return_test <- (h_test*(1+I_test)*(1+D_test)+(1-h_test)*(1+I_test))-1
+
+#yearly return for test data
+Return_test_year <-(Return_test)*12*100
+
+hist(Return_test_year, breaks = 50, col="lightgreen")
+
+library(lubridate)
+#mean return in each year
+return_each_year <- test_data %>% 
+  filter(!is.na(LossGivenDefault)) %>% 
+  mutate(Return = as.numeric(Return_test_year),
+         Year = year(LoanDate)) %>% 
+  group_by(Year) %>% 
+  summarize(mean_return = mean(Return))
+
+#plot of mean return each year
+ggplot(return_each_year,aes(x=Year,y=mean_return))+geom_col(width= 0.5,fill="green",alpha=0.4)+
+  scale_x_continuous(limits = range(2008:2019),breaks=c(2009:2018))+
+  scale_y_continuous(labels = function(x) paste(x,"%"))+
+    geom_text(aes(label= paste(round(mean_return,2),"%")),size=2.5,vjust= 0.1)+
+  coord_flip ()+ 
+  theme_minimal()
+
 
 
 
