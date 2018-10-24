@@ -206,24 +206,25 @@ summary(exp_model)
 
 #function to get hazard rates, survival rates and return
 
-Return <- function(model,data) {
+#function to get hazard rates, survival rates and return
+
+get_Return <- function(model,data) {
   
   data <- data[which(!is.na(data$LossGivenDefault)),]
   h <- 1/predict(model, newdata = data, type='response')
-  survival_prob <- exp(-h)
   D <- -(data$LossGivenDefault)
   I <- (data$Interest/12)/100
   
   profit <- (h*(1+I)*(1+D)+(1-h)*(1+I))-1
   profit_yearly <- (profit)*12*100
-  
-  return(data.frame(hazard = h, survival=survival_prob,return=profit_yearly)) 
+
+  return(data.frame(hazard = h,return=profit_yearly)) 
   
 }
 
 #Return on the full data
 
-full_return <-Return(model= exp_model,data = survival_data)
+full_return <- get_Return(model= exp_model,data = survival_data)
 hist(full_return$return,breaks = 50,col="lightgreen")
 
 
@@ -247,11 +248,11 @@ summary(exp_train)
 
 #calculating hazard rates on train data
 
-train_return <- Return(exp_train,train_data)
+train_return <- get_Return(exp_train,train_data)
 hist(train_return$return,breaks = 50, col="lightgreen")
 
 #calculate return for test data
-test_return <- Return(exp_train,test_data)
+test_return <- get_Return(exp_train,test_data)
 
 hist(test_return$return, breaks = 50, col="lightgreen")
 
@@ -279,7 +280,6 @@ ggplot(return_each_year,aes(x=Year,y=mean_return))+geom_col(width= 0.5,fill="gre
 
 #AUC calculation
 test_auc_data <- test_data[which(!is.na(test_data$LossGivenDefault)),]
-test_auc_data$survival <- test_return$survival
 test_auc_data$hazard <- test_return$hazard
 
 
@@ -292,9 +292,10 @@ get_auc_data <- function(data){
   for (i in 1:nrow(data)){
     
     hazard_prob <- rep(data$hazard[i],data$Time[i])
-    surv_prob <- rep(data$survival[i],data$Time[i])
+    t <- seq(1, data$Time[i], by=1)
+    surv_prob <- exp(- hazard_prob * t)
     
-    if (data$State == "Default") {
+    if (data$Status == 1) {
       actual_status <- c(rep(0,(data$Time[i]-1)),1)
     } else {
       actual_status <- rep(0,(data$Time[i]))
@@ -306,16 +307,15 @@ get_auc_data <- function(data){
   }
   return(auc_data)
 }
-
-auc_data <- get_auc_data(test_auc_data)
-
+  
+auc_df <- get_auc_data(test_auc_data)
+  
 #auc
 library(pROC)
 
 auc <- roc(response = auc_data$Actual, predictor = auc_data$Survival)
 auc
 plot(auc)
-
 
 
 
