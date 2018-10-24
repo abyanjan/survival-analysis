@@ -313,7 +313,7 @@ auc_df <- get_auc_data(test_auc_data)
 #auc
 library(pROC)
 
-auc <- roc(response = auc_data$Actual, predictor = auc_data$Survival)
+auc <- roc(response = auc_df$Actual, predictor = auc_df$Survival)
 auc
 plot(auc)
 
