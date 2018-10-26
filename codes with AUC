@@ -317,5 +317,8 @@ auc <- roc(response = auc_df$Actual, predictor = auc_df$Survival)
 auc
 plot(auc)
 
-
+#Brier Score
+  auc_df %>% 
+  mutate(diff = (Hazard - Actual)^2) %>% 
+  summarize(Brier_score=mean(diff))
 
