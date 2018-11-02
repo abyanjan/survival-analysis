@@ -1,0 +1,376 @@
+library(tidyverse)
+library(dplyr)
+library(car)
+library(caret)
+library(corrplot)
+library(survival)
+library(OneR)
+
+
+#Import data
+LoanData <- read_csv("C:/Users/abyanjan/Downloads/LoanData (2).zip")
+
+#Data preprocessing
+#selecting only the required columns
+
+survdata <- LoanData[c(1,2,10,12,13,16,19,21,23,24,25,27,28,29,32,34,36,49,65,68,79,85,93,94)]
+
+
+#calculating the time period of survival for each loans
+
+#Changing the Status to binary : Default loans and repaid loans to 1 and current loans to 0.
+
+# time period for the defaulted loans
+
+time_1 <- survdata %>%
+  filter(!is.na(DefaultDate)) %>%
+  mutate (Time = as.numeric( DefaultDate - LoanDate),
+          Time = round(Time/(365.25/12)) - 2,    # substracting 2 to make true survival period
+          Status = 1,
+          State="Default") 
+
+
+# time period for paid up loans  
+
+time_2 <- survdata %>%
+  filter(Status == 'Repaid' & is.na(DefaultDate)) %>%
+  mutate (Time = as.numeric( ContractEndDate - LoanDate),
+          Time = round(Time/(365.25/12)),
+          Status = 0,
+          State="Repaid")
+
+
+
+#time period for the ongoing loans with status as current and no default dates
+time_3 <- survdata %>%
+  filter(Status == 'Current' & is.na(DefaultDate)) %>% 
+  mutate(Time = as.numeric( ReportAsOfEOD - LoanDate),
+         Time = round(Time/(365.25/12)),
+         Status =0, 
+         State="Current")
+
+
+#time period for the ongoing loans with status as late and no default date
+time_4 <- survdata %>%
+  filter(Status == 'Late' & is.na(DefaultDate)) %>% 
+  mutate(Time = as.numeric( ReportAsOfEOD - LoanDate),
+         Time = round(Time/(365.25/12)),
+         Status= 0,
+         State="Current") 
+
+
+#combining the data sets having the survival times  removing unnecessary column
+
+survival_data <- bind_rows(time_1,time_2,time_3,time_4)
+
+
+summary(survival_data)
+
+#removing observations with  0 values in EmploymentStatus variable and replacing -1 with 1 in 
+#EmploymentStatus,UseofLoan and MaritalStatus
+
+survival_data <- survival_data %>% 
+  filter(EmploymentStatus != 0) %>% 
+  mutate(EmploymentStatus = if_else(EmploymentStatus == -1, 1L, EmploymentStatus),
+         UseOfLoan = if_else(UseOfLoan == -1, 1L, UseOfLoan),
+         MaritalStatus = if_else(MaritalStatus == -1, 1L, MaritalStatus))
+
+summary(survival_data)
+str(survival_data)
+
+
+#Binnig the Income to categorica variable
+
+survival_data$IncomeTotal <- bin(survival_data$IncomeTotal, nbins = 3, 
+                                 labels = c('low','middle','high'),
+                                 method = 'content')
+
+colSums(is.na(survival_data))
+
+#Filling NAs in Rating as Missing
+
+survival_data$Rating <- ifelse(is.na(survival_data$Rating)== T, 'Missing',survival_data$Rating)
+
+#Changing categorical variables to factors
+survival_data$VerificationType <- factor(survival_data$VerificationType,
+                                         levels = c('1','2','3','4'),
+                                         labels = c('Income unverified','cross-referenced by phone',
+                                                    'Income verified','Income and expenses verified'))
+survival_data$Gender <- factor(survival_data$Gender,
+                               levels = c('0','1','2'),
+                               labels = c('Male','Female','Undefined'))
+
+survival_data$Country <- factor(survival_data$Country,
+                                levels = c('EE','ES','FI','SK'),
+                                labels = c('Estonia','Spain','Finland','Slovakia'))
+
+
+survival_data$UseOfLoan <- factor(survival_data$UseOfLoan,
+                                  levels = c('0','1','2','3','4','5','6','7','8'),
+                                  labels = c('Loan consolidation','Real estate','Home improvement',
+                                             'Business','Education','Travel','Vehicle','Other','Health'))
+
+
+survival_data$MaritalStatus <- factor(survival_data$MaritalStatus,
+                                      levels = c('1','2','3','4','5'),
+                                      labels = c('Married','Cohabitant','Single','Divorced','Widow'))
+
+
+survival_data$EmploymentStatus <- factor(survival_data$EmploymentStatus,
+                                         levels = c('1','2','3','4','5','6'),
+                                         labels = c(' Unemployed', 'Partially employed','Fully employed','Self-employed',
+                                                    'Entrepreneur','Retiree'))
+survival_data$NewCreditCustomer <- factor(survival_data$NewCreditCustomer,
+                                          levels = c('False','True'),
+                                          labels = c('No','Yes'))
+
+
+survival_data$Rating <- as.factor(survival_data$Rating)
+
+levels(survival_data$Rating)
+
+#checking NAs
+colSums(is.na(survival_data))
+
+#Removing observations with NAs in Time variable
+survival_data <- survival_data[!is.na(survival_data$Time),]
+
+colSums(is.na(survival_data))
+
+
+#Kaplan-Meier overall survival curve
+
+Kmcurve <- survfit(Surv(Time,Status)~ 1, data =survival_data)
+print(Kmcurve)
+summary(Kmcurve)$table
+
+
+library(survminer)
+ggsurvplot(Kmcurve,
+           pval = TRUE, conf.int = TRUE, conf.int.style = 'step',
+           risk.table = TRUE, # Add risk table
+           surv.median.line = "hv",# Specify median survival
+           title = "Kaplan Meier Survival Curve",
+           ggtheme = theme_bw(),
+           color = "darkblue")
+
+#cumulative survivla curve
+ggsurvplot(Kmcurve,
+           pval = TRUE, conf.int = TRUE, conf.int.style = 'step',
+           risk.table = TRUE, # Add risk table
+           surv.median.line = "hv",# Specify median survival
+           fun='cumhaz',
+           title = "Cumulative Survival Curve",
+           ggtheme = theme_bw(),
+           color = "darkblue")
+
+#Cox model
+
+res.cox <- coxph(Surv(Time, Status) ~ NewCreditCustomer+VerificationType+Age+Gender+Country+
+                   AppliedAmount+Interest+LoanDuration+UseOfLoan+MaritalStatus+EmploymentStatus+
+                   IncomeTotal+Rating,
+                 data = survival_data)
+
+
+summary(res.cox)
+
+#plot the cox survivall curve
+ggsurvplot(survfit(res.cox), data=train,color = "red",
+           ggtheme = theme_minimal())
+
+#cumulative hazard curve from cox model
+ggsurvplot(survfit(res.cox), data = train,
+           pval = TRUE, conf.int = TRUE, conf.int.style = 'step',
+           risk.table = TRUE, # Add risk table
+           surv.median.line = "hv",# Specify median survival
+           fun='cumhaz',
+           title = "Cumulative Survival Curve",
+           ggtheme = theme_bw(),
+           color = "darkblue")
+
+
+
+#exponential model 
+
+#changing survival time of 0 to 1
+
+survival_data$Time <- ifelse(survival_data$Time == 0,1, survival_data$Time)
+
+
+exp_model <-survreg(Surv(Time, Status)~ NewCreditCustomer+VerificationType+Age+Gender+Country+
+                      AppliedAmount+Interest+LoanDuration+UseOfLoan+MaritalStatus+EmploymentStatus+
+                      IncomeTotal+Rating,
+                    dist = "exponential", data = survival_data)
+summary(exp_model)
+
+#function to get hazard rates and return
+
+get_Return <- function(model,data) {
+  
+  #data <- data[which(!is.na(data$LossGivenDefault)),]
+  h <- 1/predict(model, newdata = data, type='response')
+  D <- -(data$LossGivenDefault)
+  I <- (data$Interest/12)/100
+  
+  profit <- (h*(1+I)*(1+D)+(1-h)*(1+I))-1
+  profit_yearly <- (profit)*12*100
+
+  return(data.frame(hazard = h, return=profit_yearly)) 
+  
+}
+
+#Return on the full data
+
+full_return <- get_Return(model= exp_model,data = survival_data)
+hist(full_return$return,breaks = 50,col="lightgreen")
+
+
+#exponential model with train and test data
+
+#Divide train and test sets
+
+set.seed(1234)
+train_index <- createDataPartition(survival_data$Status, p=0.8, list = FALSE)
+
+train_data <- survival_data[train_index,]
+test_data <- survival_data[-train_index,]
+
+#removing rows from test data with missing LGD value
+test_data <- test_data[which(!is.na(test_data$LossGivenDefault)),]
+
+#exponential model for train data
+
+exp_train <- survreg(Surv(Time, Status)~ NewCreditCustomer+VerificationType+Age+Gender+Country+
+                       AppliedAmount+Interest+LoanDuration+UseOfLoan+MaritalStatus+EmploymentStatus+
+                       IncomeTotal+Rating,
+                     dist = "exponential", data = train_data)
+summary(exp_train)
+
+
+#calculating hazard rates on train data
+
+train_return <- get_Return(exp_train,train_data)
+hist(train_return$return,breaks = 50, col="lightgreen")
+
+#calculate return for test data
+test_return <- get_Return(exp_train,test_data)
+
+hist(test_return$return, breaks = 50, col="lightgreen")
+
+
+
+library(lubridate)
+
+#mean return in each year for test data
+
+return_each_year <- test_data %>% 
+  filter(!is.na(LossGivenDefault)) %>% 
+  mutate(Return = test_return$return,
+         Year = year(LoanDate)) %>% 
+  group_by(Year) %>% 
+  summarize(mean_return = mean(Return))
+
+#plot of mean return each year
+ggplot(return_each_year,aes(x=Year,y=mean_return))+geom_col(width= 0.5,fill="green",alpha=0.4)+
+  scale_x_continuous(limits = range(2008:2019),breaks=c(2009:2018))+
+  scale_y_continuous(labels = function(x) paste(x,"%"))+
+  geom_text(aes(label= paste(round(mean_return,2),"%")),size=2.5,vjust= 0.1)+
+  coord_flip ()+ 
+  theme_minimal()
+
+
+#Brier score calculation
+
+#define function to prepare data for brier score
+
+get_brier_score_data <- function(data){
+  
+  brier_data <- data.frame(Time_i=numeric(0), Time_j=numeric(0), Survival_i = numeric(0),
+                           Survival_j=numeric(0),Actual = numeric(0), Default_prob=numeric(0))
+  
+  for (a in 1:nrow(data)){
+    
+    hazard_rate <- rep(data$hazard[a], (data$Time[a]+1))
+    T_i <- seq(0, data$Time[a], by = 1)
+    T_j <- seq(1, (data$Time[a]+1), by = 1)
+    S_i <- exp(- hazard_rate * T_i)
+    S_j <- exp(- hazard_rate * T_j)
+    
+    if (data$Status[a] == 1) {
+      actual_status <- c(rep(0, data$Time[a]),1)
+    } else {
+      actual_status <- rep(0, (data$Time[a]+1))
+    }
+    diff <- S_i - S_j
+    
+    df <- data.frame(Time_i =T_i, Time_j = T_j, Survival_i = S_i, Survival_j=S_j, Actual=actual_status,
+                     Difference = diff)
+    
+    brier_data <- rbind(brier_data,df)
+  }
+  
+  return(brier_data)
+}
+
+#prepare test data for brier score
+
+full_test_data <- test_data %>% mutate(hazard= test_return$hazard)
+
+brier_score_full_test <- get_brier_score_data(brier_data_test)
+
+brier_score_full_test %>%
+  summarise(sum(Difference)/n()) %>% 
+  pull()
+  
+
+
+#model with rating variable only
+
+exp_rating <- exp_model <-survreg(Surv(Time, Status)~ Rating,
+                                  dist = "exponential", data = train_data)
+summary(exp_rating)
+
+#hazard and return from model with rating variable only
+rating_return <- get_Return(exp_rating,test_data)
+hist(rating_return$return, breaks = 50, col="lightgreen")
+
+#brier score for model with rating variable only
+
+#prepare test data for brier score
+
+rating_test_data <- test_data %>% mutate(hazard=rating_return$hazard)
+brier_score_rating_test <- get_brier_score_data(rating_test_data)
+
+brier_score_rating_test %>%
+  summarise(sum(Difference)/n()) %>% 
+  pull()
+
+
+#model with only intercept
+
+exp_intercept <- exp_model <-survreg(Surv(Time, Status)~ 1,
+                                     dist = "exponential", data = train_data)
+summary(exp_intercept)
+
+hazard <- exp(-3.43)
+
+#return from intercept only model 
+
+h = hazard
+D <- -(test_data$LossGivenDefault)
+I <- (test_data$Interest/12)/100
+
+profit <- (h*(1+I)*(1+D)+(1-h)*(1+I))-1
+profit_yearly <- (profit)*12*100
+
+hist(profit_yearly, breaks = 50, col="lightgreen")
+
+#prepare test data for brier score for intercept model only
+
+intercept_test_data <- test_data %>%  mutate(hazard= hazard)
+
+brier_score_intercept_test <- get_brier_score_data(intercept_test_data)
+
+brier_score_intercept_test %>%
+  summarise(sum(Difference)/n()) %>% 
+  pull()
