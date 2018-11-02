@@ -295,7 +295,7 @@ get_auc_data <- function(data){
     t <- seq(1, data$Time[i], by=1)
     surv_prob <- exp(- hazard_prob * t)
     
-    if (data$Status == 1) {
+    if (data$Status[i] == 1) {
       actual_status <- c(rep(0,(data$Time[i]-1)),1)
     } else {
       actual_status <- rep(0,(data$Time[i]))
