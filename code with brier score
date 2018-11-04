@@ -316,7 +316,7 @@ get_brier_score_data <- function(data){
 
 full_test_data <- test_data %>% mutate(hazard= test_return$hazard)
 
-brier_score_full_test <- get_brier_score_data(brier_data_test)
+brier_score_full_test <- get_brier_score_data(full_test_data)
 
 brier_score_full_test %>%
   summarise(sum(Difference)/n()) %>% 
