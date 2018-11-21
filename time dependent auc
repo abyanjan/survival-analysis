@@ -173,7 +173,7 @@ Surv.rsp.new <- Surv(test_data$Time,test_data$Status)
 library(survAUC)
 
 Auc_uno <- AUC.uno(Surv.rsp = Surv.rsp,Surv.rsp.new = Surv.rsp.new, lpnew = lp_new,
-                   times = c(0:89))
+                   times =  seq(1,5,1))
 
 Auc_uno$auc
 Auc_uno$iauc
@@ -183,3 +183,93 @@ plot(Auc_uno)
 
 BrierScore <- predErr(Surv.rsp, Surv.rsp.new, lp_train, lp_new, times= 0:89,
                       type = "brier", int.type = "weighted")
+
+
+
+#fit exponential model with only rating variable
+exp_rating <- survreg(Surv(Time,Status)~Rating, data=train_data)
+
+lp_train_rating <- - predict(exp_rating, type = 'lp')
+lp_new_rating<- - predict(exp_rating,newdata = test_data,type = 'lp')
+
+Auc_uno_rating <- AUC.uno(Surv.rsp = Surv.rsp,Surv.rsp.new = Surv.rsp.new, 
+                          lpnew = lp_new_rating,times = seq(1,5,1))
+
+Auc_uno_rating$auc
+Auc_uno_rating$iauc
+
+
+#comparison of results from bondora and exponential model
+
+#Profit calculation from hazard rates of Bondora
+test_data <- test_data[!is.na(test_data$LossGivenDefault),]
+
+P_default <- test_data$ProbabilityOfDefault
+Surv_yearly <- 1-P_default
+Surv_month <- Surv_yearly^(1/12)
+
+#hazard from bondora
+h_bondora <- 1-Surv_month
+D <- -(test_data$LossGivenDefault)
+I <- (test_data$Interest/12)/100
+
+profit <- (h_bondora*(1+I)*(1+D)+(1-h_bondora)*(1+I))-1
+profit_yearly <- (profit)*12*100
+
+
+library(lubridate)
+
+#bondora mean return in each year for test data
+
+return_each_year_bondora <- test_data %>% 
+  filter(!is.na(LossGivenDefault)) %>% 
+  mutate(Return = profit_yearly,
+         Year = year(LoanDate)) %>% 
+  group_by(Year) %>% 
+  summarize(mean_return = mean(Return))
+
+#plot of mean return each year
+p1 <- ggplot(return_each_year_bondora,aes(x=Year,y=mean_return))+geom_col(width= 0.5,fill="green",alpha=0.4)+
+  scale_x_continuous(limits = range(2008:2019),breaks=c(2009:2018))+
+  scale_y_continuous(labels = function(x) paste(x,"%"))+
+  geom_text(aes(label= paste(round(mean_return,2),"%")),size=2.5,vjust= 0.1)+
+  coord_flip ()+ 
+  theme_minimal()
+
+#return from exponential model
+get_Return <- function(model,data) {
+  
+  data <- data[which(!is.na(data$LossGivenDefault)),]
+  h <- 1/predict(model, newdata = data, type='response')
+  D <- -(data$LossGivenDefault)
+  I <- (data$Interest/12)/100
+  
+  profit <- (h*(1+I)*(1+D)+(1-h)*(1+I))-1
+  profit_yearly <- (profit)*12*100
+  
+  return(data.frame(hazard = h,return=profit_yearly)) 
+  
+}
+
+#calculate return for test data
+test_return <- get_Return(exp_fit,test_data)
+
+#mean return in each year for test data
+
+return_each_year <- test_data %>% 
+  filter(!is.na(LossGivenDefault)) %>% 
+  mutate(Return = test_return$return,
+         Year = year(LoanDate)) %>% 
+  group_by(Year) %>% 
+  summarize(mean_return = mean(Return))
+
+#plot of mean return each year
+p2 <- ggplot(return_each_year,aes(x=Year,y=mean_return))+geom_col(width= 0.5,fill="green",alpha=0.4)+
+  scale_x_continuous(limits = range(2008:2019),breaks=c(2009:2018))+
+  scale_y_continuous(labels = function(x) paste(x,"%"))+
+  geom_text(aes(label= paste(round(mean_return,2),"%")),size=2.5,vjust= 0.1)+
+  coord_flip ()+ 
+  theme_minimal()
+
+library(gridExtra)
+grid.arrange(p1,p2)
