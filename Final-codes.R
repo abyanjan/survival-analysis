@@ -11,7 +11,7 @@ library(survminer)
 
 # Import Data 
 
-LoanData <- read_csv("Data/LoanData (2).zip")
+LoanData <- read_csv("c:/Users/abyanjan/Downloads/LoanData (2).zip")
 
 
 # 2. Data Preparation ----
@@ -206,10 +206,10 @@ get_evaluation_data <- function(data){
     # generate actual status
     
     if (data$Status[i] == 1) {
-      actual_status <- c(rep(1, (data$Time[i]- 1)), 0)
+      actual_status <- c(rep(0, (data$Time[i]- 1)), 1)
       
     } else {
-      actual_status <- rep(1, data$Time[i])
+      actual_status <- rep(0, data$Time[i])
     }
     
     # create temporary data frame to store the generated data
@@ -236,15 +236,24 @@ test_evaluation_data <- map_df(.x = folds_test, .f = get_evaluation_data)
 
 # calculate mean square prediction error for test set
 
+# assign ids to group by trai and test set
+
 train_evaluation_data$id <- 'train'
 test_evaluation_data $id <- 'test'
 
-mse_test <- train_evaluation_data %>% 
+mse_evaluation <- train_evaluation_data %>% 
+  
+  # rowbind train and test evaluation data
   bind_rows(test_evaluation_data) %>% 
-  mutate(squared_error = (Actual - Prediction)^2) %>% 
+  
+  # calculate default probability and squared error
+  mutate(default_risk = 1 - Prediction,
+         squared_error = (Actual - default_risk)^2) %>%
+  
+  # group by train and test data
   group_by(id) %>% 
   summarise(mse = mean(squared_error)) 
- 
+
 
 
 # calculate AUC for test set
@@ -315,7 +324,7 @@ test_profit_evaluation <- map_df(.x = folds_test, .f = get_profit_data)
 # combine train_profit_evaluation  with train_evaluation data column wise
 
 test_profit_evaluation <- bind_cols(test_evaluation_data, test_profit_evaluation)
-  
+
 
 # profit error calculation
 
@@ -325,15 +334,28 @@ profit_error <- train_profit_evaluation %>%
   bind_rows(test_profit_evaluation) %>% 
   
   # calculate the expected profit
-  mutate(expected_profit = (Prediction * I) + ((1-Prediction) * D)) %>% 
+  mutate(expected_profit = (Prediction * I ) + ((1-Prediction) * D)) %>% 
   
   # square error of profit 
-  mutate(squared_error = (expected_profit - observed_profit)^2) %>% 
+  mutate(squared_error = (observed_profit - expected_profit)^2) %>% 
   
   # mean square error of profit for train and test set
   group_by(id) %>% 
   summarise(mse_profit = mean(squared_error))
-  
+
+
+
+# 7. profit estimation on test set
+
+profit_estimation <- test_data %>% 
+  filter(!is.na(LossGivenDefault)) %>% 
+  mutate (h = hazard,
+          D = - LossGivenDefault,
+          I = (Interest/12)/100) %>% 
+  mutate(profit = (h*(1+I)*(1+D)+(1-h)*(1+I))-1 ,
+         profit_yearly = ((profit+1)^12 - 1) * 100) %>% 
+  select(hazard,profit_yearly)
+
 
 
 
