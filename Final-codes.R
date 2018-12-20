@@ -363,6 +363,129 @@ test_data %>%
   
  
 
+# loan selection
+
+# Selection of loans based on Ratings
+ 
+selection_rating <- data.frame(Rating = factor(), expected_profit = numeric(0),
+                               Interest = numeric(0), D = numeric(0),selection = character(0),
+                               Actual_profit = numeric(0))  
+
+
+for (i in seq(0.1,1, by =0.1)){
+  
+  select_data <- test_data %>%
+    mutate(Rating = fct_relevel(Rating,"AA")) %>% 
+    arrange(Rating) %>% 
+    select(Rating, expected_profit, Interest, D, Status) %>% 
+    slice(1 : (i *nrow(test_data))) %>% 
+    mutate(selection = paste0('top_', i*100 ),
+           Actual_profit = ifelse(Status == 0, Interest, D * 100))
+    
+  selection_rating <- bind_rows(selection_rating,select_data)
+  
+}
+ 
+
+# Selection of loans based on hazard rates
+
+selection_hazard <- data.frame(hazard = numeric(0),expected_profit = numeric(0),
+                               Interest = numeric(0), D = numeric(0),selection = character(0),
+                               Actual_profit = numeric(0))  
+
+for (i in seq(0.1,1, by =0.1)){
+  
+  select_data <- test_data %>%
+    arrange(hazard) %>% 
+    select(hazard,expected_profit, Interest, D, Status) %>% 
+    slice(1 : (i *nrow(test_data))) %>% 
+    mutate(selection = paste0('top_', i*100 ),
+           Actual_profit = ifelse(Status == 0, Interest, D * 100))
+  
+  selection_hazard <- bind_rows(selection_hazard,select_data)
+  
+}
+ 
+
+# Selection of loans based on expected profit
+
+selection_profit <- data.frame(Rating = factor(), expected_profit = numeric(0),
+                               Interest = numeric(0), D = numeric(0),selection = character(0),
+                               Actual_profit = numeric(0))  
+
+for (i in seq(0.1,1, by =0.1)){
+  
+  select_data <- test_data %>%
+    arrange(desc(expected_profit)) %>% 
+    select(Rating, expected_profit, Interest, D, Status) %>% 
+    slice(1 : (i *nrow(test_data))) %>% 
+    mutate(selection = paste0('top_', i*100 ),
+           Actual_profit = ifelse(Status == 0, Interest, D * 100))
+  
+  selection_profit<- bind_rows(selection_profit,select_data)
+  
+}
+
+
+# column bind selcetion_rating, selection_hazard and selection_profit
+
+selection_combine <- bind_cols(selection_rating, selection_hazard, selection_profit)
+
+selection_combine <- selection_combine %>% 
+  select(selection, Actual_profit, Actual_profit1, Actual_profit2, expected_profit, expected_profit1,
+         expected_profit2) %>% 
+  rename(expected_profit_rating = expected_profit,
+         expected_profit_hazard = expected_profit1,
+         expected_profit_profits = expected_profit2, 
+         Actual_profit_Rating = Actual_profit,
+         Actual_profit_hazard = Actual_profit1,
+         Actual_profit_profits = Actual_profit2) %>% 
+  group_by(selection) %>% 
+  summarise(Rating_expected = mean(expected_profit_rating),
+            Hazard_expected = mean(expected_profit_hazard),
+            Expected_profit_expected = mean(expected_profit_profits),
+            Rating_actual= mean(Actual_profit_Rating),
+            Hazard_actual = mean(Actual_profit_hazard),
+            Expected_profit_actual = mean(Actual_profit_profits)) %>% 
+  gather(key = selection_type, value = avg_profit, -selection)
+
+# plot the avg return based on different selection criteria
+
+selection_combine %>% 
+  mutate(selection = as.factor(selection),
+         selection = fct_relevel(selection, "top_100", after = 9)) %>% 
+  mutate(selection_type = as.factor(selection_type)) %>% 
+         
+  ggplot(aes(x = avg_profit, y = selection))+
+  geom_point(size = 2)+
+  scale_x_continuous(breaks = seq(0,40, by= 5))+
+  geom_segment(aes(xend = 0, yend = selection))+
+  facet_wrap(~ selection_type)+
+  geom_label(aes(label = round(avg_profit,2),color = selection_type, hjust='inward'),
+             show.legend = F)+
+  scale_color_brewer(type='div', palette = 'Dark2')+
+  #scale_color_manual(values = c( "black","blue","brown3"))+
+  theme_tq()+
+  labs(title = "Average Predicted Expected Profit based on Different selection Criteria",
+       x = "Aveage Profit (%)",
+       y = "")+
+  theme(title = element_text(size = 10))
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
 # 8. loan selection ----
    
 # Selection of loans based on Ratings
